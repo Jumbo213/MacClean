@@ -81,7 +81,7 @@ import MacCleanCore
             try? model.trashService.restore(record)
         }
         try? fm.removeItem(at: fixture)
-        let result: [String: Any] = ["passed": passed, "failures": failures, "success": failures.isEmpty, "clickDiagnostics": debug]
+        let result: [String: Any] = ["passed": passed, "failures": failures, "success": failures.isEmpty, "clickDiagnostics": debug, "mapClicks": model.mapClickLog]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: report) }
     }
     private static func waitUntilIdle(_ model: AppModel) async throws {

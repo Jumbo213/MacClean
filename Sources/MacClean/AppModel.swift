@@ -73,6 +73,7 @@ func sizeText(_ bytes: Int64) -> String {
     @Published var hasAttemptedStorageScan = false
     @Published var mapSelectedPath: String?
     var navigationFrames: [String: CGRect] = [:]
+    var mapClickLog: [String] = []
     private var cleanupCatalog: [CleanupItem] = []
     private var appCatalog: [AppFootprint] = []
     private var duplicateCatalog: [DuplicateGroup] = []

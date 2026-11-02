@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MacCleanCore
 
 struct DiskMapSlice: Identifiable {
@@ -85,17 +86,10 @@ struct DiskMapView: View {
                         .font(.system(size: 10)).foregroundColor(.muted)
                 }.frame(width: 126).allowsHitTesting(false)
             }.frame(width: 292, height: 292)
-                .contentShape(Circle())
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let location): hoveredID = slice(at: location)?.id
-                    case .ended: hoveredID = nil
-                    }
-                }
-                .gesture(DragGesture(minimumDistance: 0).onEnded { value in
-                    guard abs(value.translation.width) < 8, abs(value.translation.height) < 8 else { return }
-                    if let hit = slice(at: value.location) { activate(hit) }
-                })
+                .overlay(DiskMapInput(onClick: { point in
+                    if CommandLine.arguments.contains("--ui-check") { model.mapClickLog.append("point=\(point), hit=\(slice(at: point)?.name ?? "none")") }
+                    if let hit = slice(at: point) { activate(hit) }
+                }, onHover: { point in hoveredID = point.flatMap { slice(at: $0)?.id } }))
                 .help(focused.map { "\($0.name) · \(sizeText($0.bytes))" } ?? "点击文件夹扇区展开，或使用右侧列表")
                 .accessibilityLabel("磁盘占用环形图，可使用右侧列表选择项目")
                 .onChange(of: path) { _ in hoveredID = nil }
@@ -140,5 +134,37 @@ struct DiskMapView: View {
         hoveredID = nil
         if let node = slice.node { model.openMapNode(node) }
         else { model.page = .storage }
+    }
+}
+
+
+private struct DiskMapInput: NSViewRepresentable {
+    let onClick: (CGPoint) -> Void
+    let onHover: (CGPoint?) -> Void
+    func makeNSView(context: Context) -> InputView { InputView() }
+    func updateNSView(_ view: InputView, context: Context) { view.onClick = onClick; view.onHover = onHover }
+
+    final class InputView: NSView {
+        var onClick: ((CGPoint) -> Void)?
+        var onHover: ((CGPoint?) -> Void)?
+        private var tracking: NSTrackingArea?
+        private var down: CGPoint?
+        override var isFlipped: Bool { true }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let area = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect], owner: self)
+            addTrackingArea(area); tracking = area
+        }
+        override func mouseDown(with event: NSEvent) { down = convert(event.locationInWindow, from: nil) }
+        override func mouseUp(with event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            if let down, hypot(point.x - down.x, point.y - down.y) < 8 { onClick?(point) }
+            down = nil
+        }
+        override func mouseMoved(with event: NSEvent) { onHover?(convert(event.locationInWindow, from: nil)) }
+        override func mouseEntered(with event: NSEvent) { onHover?(convert(event.locationInWindow, from: nil)) }
+        override func mouseExited(with event: NSEvent) { onHover?(nil) }
     }
 }

@@ -21,4 +21,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already published; preserving existing assets."
+            exit 0
+          fi
           gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/SHA256SUMS.txt --verify-tag --title "MacClean $GITHUB_REF_NAME" --notes-file "docs/RELEASE-${GITHUB_REF_NAME#v}.md"

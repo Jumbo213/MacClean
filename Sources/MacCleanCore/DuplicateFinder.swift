@@ -4,7 +4,8 @@ import CryptoKit
 public enum DuplicateFinder {
     public static func find(in scan: StorageScan, minimumSize: Int64 = 1_048_576,
                             control: ScanControl = ScanControl(), progress: @Sendable (ScanProgress) -> Void = { _ in }) throws -> [DuplicateGroup] {
-        let candidates = scan.files.filter { $0.logicalBytes >= minimumSize && !$0.cloudOnly && $0.bytes > 0 }
+        let candidates = scan.files.filter { $0.logicalBytes >= minimumSize && !$0.cloudOnly && $0.bytes > 0 &&
+            !$0.url.pathComponents.contains(".Trash") && !$0.url.pathComponents.contains(".Trashes") }
         let buckets = Dictionary(grouping: candidates, by: \.logicalBytes).values.filter { $0.count > 1 }
         var hashes: [String: [FileNode]] = [:], count = 0
         for bucket in buckets {

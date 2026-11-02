@@ -35,7 +35,9 @@ enum Page: String, CaseIterable {
 }
 
 func sizeText(_ bytes: Int64) -> String {
-    ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    if bytes <= 0 { return "0 B" }
+    let formatter = ByteCountFormatter(); formatter.countStyle = .file; formatter.allowsNonnumericFormatting = false
+    return formatter.string(fromByteCount: bytes)
 }
 
 @MainActor final class AppModel: ObservableObject {
@@ -68,19 +70,39 @@ func sizeText(_ bytes: Int64) -> String {
     @Published var showingReview = false
     @Published var ignoredPaths: Set<String>
     @Published var lastCleaned: Int64 = 0
-    let trashService = TrashService()
+    @Published var hasAttemptedStorageScan = false
+    @Published var mapSelectedPath: String?
+    var navigationFrames: [String: CGRect] = [:]
+    private var cleanupCatalog: [CleanupItem] = []
+    private var appCatalog: [AppFootprint] = []
+    private var duplicateCatalog: [DuplicateGroup] = []
+    let trashService: TrashService
+    static weak var active: AppModel?
     private var control: ScanControl?
 
-    init() {
+    init(service: TrashService? = nil) {
+        trashService = service ?? TrashService()
         ignoredPaths = Set(UserDefaults.standard.stringArray(forKey: "ignoredPaths") ?? [])
+        Self.active = self
         refreshDisk(); loadHistory()
         if CommandLine.arguments.contains("--capture") {
             if let index = CommandLine.arguments.firstIndex(of: "--page"), CommandLine.arguments.count > index + 1,
                let requestedPage = Page(rawValue: CommandLine.arguments[index + 1]) { page = requestedPage }
             if let index = CommandLine.arguments.firstIndex(of: "--scan-path"), CommandLine.arguments.count > index + 1 {
-                chosenRoot = URL(fileURLWithPath: CommandLine.arguments[index + 1]); page = .storage; scanStorage()
+                chosenRoot = URL(fileURLWithPath: CommandLine.arguments[index + 1]); scanStorage()
+                if !CommandLine.arguments.contains("--page") { page = .storage }
             }
         }
+    }
+    static func forLaunch() -> AppModel {
+        if let index = CommandLine.arguments.firstIndex(of: "--ui-check"), CommandLine.arguments.count > index + 1 {
+            let report = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+            let fixture = report.deletingLastPathComponent().appendingPathComponent("MacClean-ui-fixture-" + UUID().uuidString)
+            let model = AppModel(service: TrashService(historyURL: fixture.appendingPathComponent("history.json")))
+            model.hasAttemptedStorageScan = true; model.page = .storage
+            return model
+        }
+        return AppModel()
     }
     var usedCapacity: Int64 { max(0, totalCapacity - availableCapacity) }
     var visibleCleanup: [CleanupItem] { cleanup.filter { !ignoredPaths.contains($0.id) } }
@@ -98,15 +120,16 @@ func sizeText(_ bytes: Int64) -> String {
         do { history = try trashService.load() }
         catch { notice = "清理记录读取失败：\(error.localizedDescription)" }
     }
-    func chooseFolder(forDuplicates: Bool = false) {
+    func chooseFolder(forDuplicates: Bool = false, forOverview: Bool = false) {
         guard !busy else { return }
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false; panel.prompt = "选择文件夹"; panel.directoryURL = forDuplicates ? duplicateRoot : chosenRoot
         if panel.runModal() == .OK, let url = panel.url {
             if forDuplicates { duplicateRoot = url; scanDuplicates() }
-            else { chosenRoot = url; page = .storage; scanStorage() }
+            else { chosenRoot = url; page = forOverview ? .overview : .storage; scanStorage() }
         }
     }
+    func chooseFolderForMap() { chooseFolder(forOverview: true) }
     private func begin(_ title: String, cancellable: Bool = true) -> ScanControl? {
         guard !busy else { return nil }
         busy = true; canCancel = cancellable; operation = title; progressPath = "正在准备…"; scannedCount = 0
@@ -127,6 +150,7 @@ func sizeText(_ bytes: Int64) -> String {
     }
     func scanStorage() {
         guard let control = begin("正在分析存储空间") else { return }
+        hasAttemptedStorageScan = true
         let root = chosenRoot
         Task {
             do {
@@ -146,7 +170,7 @@ func sizeText(_ bytes: Int64) -> String {
                 let result = try await Task.detached(priority: .userInitiated) { [self] in
                     try CleanupScanner.scan(runningBundleIDs: ids, control: control) { self.progress($0) }
                 }.value
-                cleanup = result.items; cleanupSkipped = result.skipped; hasCleanupScan = true
+                cleanup = result.items; cleanupCatalog = result.items; cleanupSkipped = result.skipped; hasCleanupScan = true
                 cleanupSelection = Set(visibleCleanup.filter(\.recommended).map(\.id)); finish()
                 if !result.skipped.isEmpty { notice = "有 \(result.skipped.count) 个位置未读取，可查看扫描详情。" }
             } catch { finish(error) }
@@ -159,7 +183,7 @@ func sizeText(_ bytes: Int64) -> String {
                 let result = try await Task.detached(priority: .userInitiated) { [self] in
                     try AppScanner.scan(control: control) { self.progress($0) }
                 }.value
-                apps = result; hasAppScan = true; finish()
+                apps = result; appCatalog = result; hasAppScan = true; finish()
             } catch { finish(error) }
         }
     }
@@ -173,7 +197,7 @@ func sizeText(_ bytes: Int64) -> String {
                     let groups = try DuplicateFinder.find(in: scan, control: control) { self.progress($0) }
                     return (groups, scan.skipped)
                 }.value
-                duplicates = result.0; hasDuplicateScan = true; duplicateSelection = []; finish()
+                duplicates = result.0; duplicateCatalog = result.0; hasDuplicateScan = true; duplicateSelection = []; finish()
                 if !result.1.isEmpty { notice = "有 \(result.1.count) 个位置未读取，未参与重复比对。" }
             } catch { finish(error) }
         }
@@ -210,16 +234,16 @@ func sizeText(_ bytes: Int64) -> String {
         let service = trashService
         Task {
             let report = await Task.detached(priority: .userInitiated) { [self] in service.trash(items, control: control) { self.progress($0) } }.value
-            let moved = Set(report.records.map(\.originalPath))
             lastCleaned = report.records.reduce(0) { $0 + $1.bytes }
-            cleanup.removeAll { moved.contains($0.id) }; cleanupSelection.subtract(moved)
-            apps.removeAll { moved.contains($0.id) }
-            // Descendant totals and hashes are now stale; require a fresh scan.
-            storage = nil; hasDuplicateScan = false; duplicates = []; duplicateSelection = []
-            hasAppScan = false; apps = []
+            if !report.records.isEmpty {
+                operation = "正在更新清理结果"; canCancel = false
+                await updateResults(moves: report.records.map {
+                    FileMove(source: URL(fileURLWithPath: $0.originalPath), destination: URL(fileURLWithPath: $0.trashPath))
+                })
+            }
             pending = []; loadHistory(); finish()
             let failures = report.failures + (blockedIDs.isEmpty ? [] : ["已跳过 \(blockedIDs.count) 个正在运行的应用 / 关联项目，请退出应用后重新扫描。"])
-            notice = "已将 \(report.records.count) 项（\(sizeText(lastCleaned))）移到废纸篓。清空废纸篓后才会释放空间。"
+            notice = "已将 \(report.records.count) 项（\(sizeText(lastCleaned))）移到废纸篓。结果已更新，可继续整理；清空废纸篓后才会释放空间。"
             if !failures.isEmpty { details = failures; showingDetails = true }
         }
     }
@@ -229,11 +253,62 @@ func sizeText(_ bytes: Int64) -> String {
         Task {
             do {
                 try await Task.detached { try service.restore(record) }.value
-                loadHistory(); storage = nil; hasCleanupScan = false; hasAppScan = false; hasDuplicateScan = false
-                cleanup = []; cleanupSelection = []; apps = []; duplicates = []; duplicateSelection = []
-                finish(); notice = "已恢复到原位置：\(record.originalPath)"
+                operation = "正在更新恢复结果"
+                await updateResults(moves: [FileMove(source: URL(fileURLWithPath: record.trashPath), destination: URL(fileURLWithPath: record.originalPath))], restoring: true)
+                loadHistory(); finish(); notice = "已恢复到原位置：\(record.originalPath)"
             } catch { finish(error) }
         }
+    }
+    private func updateResults(moves: [FileMove], restoring: Bool = false) async {
+        let previousScan = storage, changes = moves.flatMap { [$0.source, $0.destination] }
+        var cleanupInput = cleanup, appInput = apps
+        if restoring {
+            let ids = Set(cleanupInput.map(\.id))
+            cleanupInput += cleanupCatalog.filter { !ids.contains($0.id) && ScanUpdater.intersects($0.url, changes: changes) }
+            for template in appCatalog {
+                if let index = appInput.firstIndex(where: { $0.id == template.id }) {
+                    let current = appInput[index], relatedIDs = Set(current.related.map(\.id))
+                    let restored = template.related.filter { !relatedIDs.contains($0.id) && ScanUpdater.intersects($0.url, changes: changes) }
+                    appInput[index] = AppFootprint(name: current.name, url: current.url, bundleID: current.bundleID,
+                                                  version: current.version, bundle: current.bundle,
+                                                  related: current.related + restored, skippedCount: current.skippedCount)
+                } else if ScanUpdater.intersects(template.url, changes: changes) { appInput.append(template) }
+            }
+        }
+        let cleanupSnapshot = cleanupInput, appSnapshot = appInput, groups = duplicateCatalog
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                let scan = try previousScan.map { try ScanUpdater.applying(moves, to: $0) }
+                var cleaned: [CleanupItem] = []
+                for item in cleanupSnapshot { if let value = try ScanUpdater.refresh(item, changes: changes) { cleaned.append(value) } }
+                return (scan, cleaned, try ScanUpdater.refreshApps(appSnapshot, changes: changes),
+                        try ScanUpdater.refreshDuplicates(groups, changes: changes))
+            }.value
+            storage = result.0; cleanup = result.1; apps = result.2; duplicates = result.3
+            cleanupSelection.formIntersection(Set(cleanup.map(\.id)))
+            duplicateSelection.formIntersection(Set(duplicates.flatMap { $0.files.dropFirst().map(\.id) }))
+            if let scan = storage {
+                while scan.nodes[browserPath] == nil && browserPath != scan.root.path {
+                    browserPath = URL(fileURLWithPath: browserPath).deletingLastPathComponent().path
+                    if !Paths.isInside(URL(fileURLWithPath: browserPath), root: scan.root) { browserPath = scan.root.path; break }
+                }
+                if let selected = mapSelectedPath, scan.nodes[selected] == nil { mapSelectedPath = nil }
+            }
+        } catch {
+            // Keep the last snapshot on a partial refresh error rather than discarding every page.
+            details = ["局部更新未完成，已有结果仍保留：\(error.localizedDescription)"]
+            showingDetails = true
+        }
+    }
+
+    func openMapNode(_ node: FileNode) {
+        if node.isDirectory { browserPath = node.id; mapSelectedPath = nil }
+        else { mapSelectedPath = node.id }
+    }
+    func mapUp() {
+        guard let scan = storage, browserPath != scan.root.path else { return }
+        let parent = URL(fileURLWithPath: browserPath).deletingLastPathComponent().path
+        if scan.nodes[parent] != nil { browserPath = parent; mapSelectedPath = nil }
     }
     func ignore(_ path: String) {
         ignoredPaths.insert(path); cleanupSelection.remove(path); saveIgnored()

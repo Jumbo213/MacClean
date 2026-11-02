@@ -4,13 +4,54 @@ import MacCleanCore
 // Disambiguate the classic property wrapper from newer SDK State macros.
 typealias ViewState<Value> = SwiftUI.State<Value>
 
+enum AppTheme {
+    static let chart: [Color] = [Color(red: 0.43, green: 0.38, blue: 0.88), Color(red: 0.28, green: 0.52, blue: 0.91),
+                                Color(red: 0.25, green: 0.66, blue: 0.75), Color(red: 0.94, green: 0.65, blue: 0.35),
+                                Color(red: 0.83, green: 0.43, blue: 0.64), Color(red: 0.55, green: 0.56, blue: 0.75),
+                                Color(red: 0.58, green: 0.64, blue: 0.73), Color(red: 0.78, green: 0.80, blue: 0.85)]
+}
+
 extension Color {
-    static let ink = Color(red: 0.13, green: 0.19, blue: 0.21)
-    static let muted = Color(red: 0.47, green: 0.53, blue: 0.54)
-    static let accent = Color(red: 0.09, green: 0.47, blue: 0.38)
-    static let mint = Color(red: 0.89, green: 0.95, blue: 0.92)
-    static let canvas = Color(red: 0.965, green: 0.975, blue: 0.971)
-    static let line = Color(red: 0.90, green: 0.93, blue: 0.91)
+    static let ink = Color(red: 0.14, green: 0.15, blue: 0.20)
+    static let muted = Color(red: 0.47, green: 0.49, blue: 0.56)
+    static let accent = Color(red: 0.38, green: 0.34, blue: 0.81)
+    static let tintSurface = Color(red: 0.93, green: 0.93, blue: 0.985)
+    static let canvas = Color(red: 0.96, green: 0.965, blue: 0.98)
+    static let line = Color(red: 0.89, green: 0.90, blue: 0.93)
+}
+
+struct NavigationFramesKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { _, new in new } }
+}
+
+struct NavigationRow: View {
+    let page: Page
+    let selected: Bool
+    let action: () -> Void
+    @ViewState<Bool> private var hovered = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: page.symbol).font(.system(size: 15, weight: selected ? .semibold : .regular)).frame(width: 20)
+                Text(page.title).font(.system(size: 13, weight: selected ? .semibold : .medium))
+                Spacer(minLength: 0)
+                if selected { RoundedRectangle(cornerRadius: 2).fill(Color.accent).frame(width: 3, height: 15) }
+            }
+            .foregroundColor(selected ? .accent : .ink.opacity(0.76))
+            .padding(.horizontal, 14).frame(maxWidth: .infinity, minHeight: 45)
+            .background(selected ? Color.tintSurface : (hovered ? Color.canvas : Color.clear))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .accessibilityIdentifier("nav-" + page.rawValue)
+        .accessibilityLabel(page.title)
+        .background(GeometryReader { proxy in
+            Color.clear.preference(key: NavigationFramesKey.self, value: [page.rawValue: proxy.frame(in: .named("MacCleanContent"))])
+        })
+    }
 }
 
 struct Card<Content: View>: View {
@@ -98,7 +139,7 @@ struct CheckBox: View {
         Button(action: action) {
             Image(systemName: checked ? "checkmark.square.fill" : "square")
                 .font(.system(size: 18)).foregroundColor(locked ? .line : (checked ? .accent : .muted.opacity(0.55)))
-        }.buttonStyle(.plain).disabled(locked).accessibilityLabel(checked ? "取消选择" : "选择")
+        }.buttonStyle(.plain).padding(5).contentShape(Rectangle()).disabled(locked).accessibilityLabel(checked ? "取消选择" : "选择")
     }
 }
 struct DataRow: View {

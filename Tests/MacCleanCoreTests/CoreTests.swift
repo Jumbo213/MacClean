@@ -180,5 +180,112 @@ final class CoreTests: TestCase {
         XCTAssertTrue(report.records.isEmpty); XCTAssertFalse(report.failures.isEmpty)
         XCTAssertTrue(fm.fileExists(atPath: target.path))
     }
+    func testIncrementalRemovalKeepsTreeAndUpdatesAncestors() throws {
+        let a = try file("Scope/nested/a"), b = try file("Scope/nested/b")
+        let scope = root.appendingPathComponent("Scope"), outside = root.appendingPathComponent("outside")
+        let original = try StorageScanner.scan(root: scope)
+        try fm.moveItem(at: a, to: outside)
+        let updated = try ScanUpdater.applying([FileMove(source: a, destination: outside)], to: original)
+        let fresh = try StorageScanner.scan(root: scope)
+        XCTAssertNil(updated.nodes[a.path]); XCTAssertNotNil(updated.nodes[b.path])
+        XCTAssertEqual(updated.total, fresh.total)
+        XCTAssertEqual(updated.nodes[scope.path]?.fileCount, 1)
+        XCTAssertEqual(updated.fingerprint(), fresh.fingerprint())
+        // A second cleanup must accept the newly captured parent stamp and fingerprint.
+        let parent = scope.appendingPathComponent("nested")
+        let selection = CleanupItem(url: parent, bytes: updated.nodes[parent.path]!.bytes, category: "测试", reason: "测试", recommended: false,
+                                    stamp: updated.nodes[parent.path]!.stamp, treeFingerprint: updated.fingerprint(under: parent))
+        try SafetyPolicy.validate(selection)
+    }
+    func testMoveWithinScopePreservesTrashOccupationAndRestores() throws {
+        let a = try file("Scope/nested/a"), scope = root.appendingPathComponent("Scope")
+        let destination = scope.appendingPathComponent("Trash/a")
+        let original = try StorageScanner.scan(root: scope)
+        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.moveItem(at: a, to: destination)
+        let updated = try ScanUpdater.applying([FileMove(source: a, destination: destination)], to: original)
+        let fresh = try StorageScanner.scan(root: scope)
+        XCTAssertEqual(updated.total, fresh.total)
+        XCTAssertNotNil(updated.nodes[destination.path]); XCTAssertNil(updated.nodes[a.path])
+        XCTAssertEqual(updated.fingerprint(), fresh.fingerprint())
+        try fm.moveItem(at: destination, to: a)
+        let restored = try ScanUpdater.applying([FileMove(source: destination, destination: a)], to: updated)
+        XCTAssertNotNil(restored.nodes[a.path]); XCTAssertNil(restored.nodes[destination.path])
+        try XCTAssertEqual(restored.total, StorageScanner.scan(root: scope).total)
+    }
+    func testIncrementalDirectoryMoveKeepsNestedNodes() throws {
+        try file("Scope/Folder/deep/a"); try file("Scope/Folder/b")
+        let scope = root.appendingPathComponent("Scope"), source = scope.appendingPathComponent("Folder")
+        let destination = scope.appendingPathComponent("Trash/Folder")
+        let snapshot = try StorageScanner.scan(root: scope)
+        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.moveItem(at: source, to: destination)
+        let updated = try ScanUpdater.applying([FileMove(source: source, destination: destination)], to: snapshot)
+        let fresh = try StorageScanner.scan(root: scope)
+        XCTAssertEqual(updated.fingerprint(), fresh.fingerprint())
+        XCTAssertEqual(updated.nodes[destination.path]?.fileCount, 2)
+        XCTAssertNotNil(updated.nodes[destination.appendingPathComponent("deep/a").path])
+    }
+    func testIncrementalHardLinkReassignsAllocation() throws {
+        let a = try file("Scope/a"), b = root.appendingPathComponent("Scope/b")
+        try fm.linkItem(at: a, to: b)
+        let scope = root.appendingPathComponent("Scope"), snapshot = try StorageScanner.scan(root: scope)
+        let counted = snapshot.files.first { $0.bytes > 0 }!
+        let outside = root.appendingPathComponent("outside")
+        try fm.moveItem(at: counted.url, to: outside)
+        let updated = try ScanUpdater.applying([FileMove(source: counted.url, destination: outside)], to: snapshot)
+        try XCTAssertEqual(updated.total, StorageScanner.scan(root: scope).total)
+        XCTAssertGreaterThan(updated.files.first!.bytes, 0)
+    }
+    func testIncrementalUpdateDoesNotRescanUnrelatedFiles() throws {
+        let changed = try file("Scope/a"), unrelated = try file("Scope/Unrelated/b")
+        let snapshot = try StorageScanner.scan(root: root.appendingPathComponent("Scope"))
+        let oldStamp = snapshot.nodes[unrelated.path]!.stamp
+        try Data("external edit not part of this operation".utf8).write(to: unrelated)
+        let outside = root.appendingPathComponent("outside")
+        try fm.moveItem(at: changed, to: outside)
+        let updated = try ScanUpdater.applying([FileMove(source: changed, destination: outside)], to: snapshot)
+        XCTAssertEqual(updated.nodes[unrelated.path]?.stamp, oldStamp)
+        XCTAssertThrowsError(try SafetyPolicy.validate(CleanupItem(url: unrelated, bytes: 1, category: "测试", reason: "测试", recommended: false, stamp: oldStamp)))
+    }
+    func testDuplicateGroupsRemainAfterPartialCleanup() throws {
+        let data = Data(repeating: 4, count: 1_100_000)
+        let a = try file("Copies/a", data: data), b = try file("Copies/b", data: data), c = try file("Copies/c", data: data)
+        let groups = try DuplicateFinder.find(in: StorageScanner.scan(root: root.appendingPathComponent("Copies")))
+        let outside = root.appendingPathComponent("outside")
+        try fm.moveItem(at: c, to: outside)
+        let updated = try ScanUpdater.refreshDuplicates(groups, changes: [c, outside])
+        XCTAssertEqual(updated.count, 1); XCTAssertEqual(updated.first?.files.count, 2)
+        try fm.removeItem(at: b)
+        try XCTAssertTrue(try ScanUpdater.refreshDuplicates(groups, changes: [b]).isEmpty)
+        try fm.moveItem(at: outside, to: c)
+        let restored = try ScanUpdater.refreshDuplicates(groups, changes: [c])
+        XCTAssertEqual(restored.count, 1); XCTAssertEqual(Set(restored[0].files.map(\.url)), Set([a, c]))
+    }
+    func testAppAndCleanupRemainUsableAfterRelatedRemoval() throws {
+        try file("App.app/Contents/binary")
+        let cache = try file("Cache/a"), unrelated = try file("Other/b")
+        let appURL = root.appendingPathComponent("App.app"), cacheURL = root.appendingPathComponent("Cache")
+        let appScan = try StorageScanner.scan(root: appURL), cacheScan = try StorageScanner.scan(root: cacheURL)
+        let bundle = CleanupItem(url: appURL, bytes: appScan.total, category: "应用本体", reason: "测试", recommended: false, stamp: try FileStamp(url: appURL), treeFingerprint: appScan.fingerprint())
+        let related = CleanupItem(url: cacheURL, bytes: cacheScan.total, category: "缓存", reason: "测试", recommended: true, stamp: try FileStamp(url: cacheURL), treeFingerprint: cacheScan.fingerprint())
+        let app = AppFootprint(name: "Test", url: appURL, bundleID: "com.test", version: "1", bundle: bundle, related: [related], skippedCount: 0)
+        try fm.removeItem(at: cache)
+        let updated = try ScanUpdater.refreshApps([app], changes: [cache])
+        XCTAssertEqual(updated.count, 1); XCTAssertEqual(updated[0].bundle.stamp, bundle.stamp)
+        XCTAssertEqual(updated[0].related.count, 1)
+        try SafetyPolicy.validate(updated[0].related[0])
+        let originalUnrelated = try item(unrelated)
+        try XCTAssertEqual(try ScanUpdater.refresh(originalUnrelated, changes: [cache])?.stamp, originalUnrelated.stamp)
+    }
+
+    func testDuplicateTrashCopiesAreExcluded() throws {
+        let data = Data(repeating: 3, count: 1_100_000)
+        try file("Scope/kept", data: data)
+        try file("Scope/.Trash/old-copy", data: data)
+        try file("Scope/.Trashes/501/old-copy", data: data)
+        let groups = try DuplicateFinder.find(in: StorageScanner.scan(root: root.appendingPathComponent("Scope")))
+        XCTAssertTrue(groups.isEmpty)
+    }
 
 }

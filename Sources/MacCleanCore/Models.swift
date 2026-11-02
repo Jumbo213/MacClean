@@ -133,6 +133,10 @@ public struct AppFootprint: Identifiable, Sendable {
     public let bundle: CleanupItem
     public let related: [CleanupItem]
     public let skippedCount: Int
+    public init(name: String, url: URL, bundleID: String, version: String, bundle: CleanupItem, related: [CleanupItem], skippedCount: Int) {
+        self.name = name; self.url = url; self.bundleID = bundleID; self.version = version
+        self.bundle = bundle; self.related = related; self.skippedCount = skippedCount
+    }
     public var bytes: Int64 { bundle.bytes + related.reduce(0) { $0 + $1.bytes } }
 }
 

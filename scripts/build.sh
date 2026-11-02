@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
-DIST="$PWD/dist"
+DIST="${MACCLEAN_DIST_DIR:-$PWD/dist}"
 SIGN_IDENTITY="${MACCLEAN_SIGN_IDENTITY:--}"
 mkdir -p "$DIST"
 # Swift Package Manager combines both slices into a Universal 2 executable.

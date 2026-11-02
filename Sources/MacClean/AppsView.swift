@@ -24,7 +24,7 @@ struct AppsView: View {
                                         Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path)).resizable().frame(width: 40, height: 40)
                                         VStack(alignment: .leading, spacing: 5) { Text(app.name).font(.system(size: 13, weight: .medium)).lineLimit(1); Text(app.version).font(.system(size: 10)).foregroundColor(.muted) }
                                         Spacer(); Text(sizeText(app.bytes)).font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                                    }.padding(16).background(selectedID == app.id ? Color.mint.opacity(0.7) : Color.white).contentShape(Rectangle())
+                                    }.padding(16).background(selectedID == app.id ? Color.tintSurface.opacity(0.7) : Color.white).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
                                 Divider().padding(.leading, 67)
                             }

@@ -62,7 +62,7 @@ struct SettingsView: View {
                 }
                 Card {
                     VStack(alignment: .leading, spacing: 14) {
-                        HStack { TrashMark(); VStack(alignment: .leading, spacing: 5) { Text("MacClean 1.0.0").font(.system(size: 16, weight: .semibold)); Text("原生 SwiftUI · MIT 开源协议").font(.system(size: 11)).foregroundColor(.muted) } }
+                        HStack { TrashMark(); VStack(alignment: .leading, spacing: 5) { Text("MacClean 1.1.0").font(.system(size: 16, weight: .semibold)); Text("原生 SwiftUI · MIT 开源协议").font(.system(size: 11)).foregroundColor(.muted) } }
                         Text("离线扫描，不收集文件内容、不发送遥测。不会自动执行清理、永久删除文件、清空废纸篓或修改系统快照。文件大小受权限、硬链接、APFS 克隆和云文件影响，目录合计不等于精确可释放空间。").font(.system(size: 12)).foregroundColor(.muted).lineSpacing(5)
                         Text("应用关联数据仅按 Bundle ID 精确匹配，不能代表完整归属；共享数据与自定义目录可能未包含。").font(.system(size: 11)).foregroundColor(.muted).lineSpacing(4)
                     }

@@ -12,7 +12,8 @@
 
 | 功能 | 说明 |
 | --- | --- |
-| 空间概览 | 实时读取磁盘总容量、已用与可用空间 |
+| 空间概览 | 石墨灰与蓝紫色界面；双层环形图按真实占用比例绘制，内圈当前目录、外圈下一层内容，支持悬停查看、点击下钻与大文件 TOP 5 |
+| 连续清理 | 清理后保留扫描结果、位置与剩余勾选，仅局部更新受影响项目；应用和重复文件结果继续可用 |
 | 存储分析 | 扫描整个磁盘、用户目录或指定文件夹；包含隐藏文件；逐层查看文件与文件夹占用，支持大小 / 名称排序、名称搜索、Finder 定位与复制路径 |
 | 大文件整理 | 筛选当前扫描范围内逻辑大小 ≥ 100 MB 的文件，手动选择清理 |
 | 应用管理 | 统计应用本体与 Bundle ID 精确匹配的缓存、设置、容器等数据；支持卸载及可选关联数据清理 |
@@ -23,18 +24,18 @@
 
 ## 安装
 
-1. 在 [Releases](https://github.com/Jumbo213/MacClean/releases) 下载 `MacClean-1.0.0-universal.dmg`。
+1. 在 [Releases](https://github.com/Jumbo213/MacClean/releases) 下载 `MacClean-1.1.0-universal.dmg`。
 2. 打开 DMG，把 **MacClean.app** 拖入 **Applications**。
-3. 打开应用，选择扫描范围；需要更多覆盖时，在「系统设置 → 隐私与安全性 → 完整磁盘访问权限」添加 MacClean，退出后重新打开。
+3. 打开应用，首次自动分析用户目录；可在概览选择其他目录或整盘分析。需要更多覆盖时，在「系统设置 → 隐私与安全性 → 完整磁盘访问权限」添加 MacClean，退出后重新打开。
 
-支持 **macOS 13 Ventura 及更新版本**。Universal 2 安装包同时包含 **Apple Silicon / Intel** 架构。本机已验证 Apple Silicon；Intel 架构已交叉编译并经 Rosetta 启动，未在 Intel 实机验证。详细边界见 [验证记录](docs/VALIDATION.md)。
+支持 **macOS 13 Ventura 及更新版本**。Universal 2 安装包同时包含 **Apple Silicon / Intel** 架构。本机已验证 Apple Silicon；Intel 架构已交叉编译并经 Rosetta 启动，未在 Intel 实机验证。详细边界见 [验证记录](docs/VALIDATION-1.1.0.md)。
 
 ### 首次打开提示
 
 当前 Release 使用 **ad-hoc 临时签名，未经 Apple Developer ID 签名与公证**，下载后 macOS 可能拦截。确认文件来自本仓库且校验一致后，在「系统设置 → 隐私与安全性」选择允许打开。不要全局关闭 Gatekeeper。也可以自行从源码构建。具体步骤参见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
 
 ```bash
-shasum -a 256 MacClean-1.0.0-universal.dmg
+shasum -a 256 MacClean-1.1.0-universal.dmg
 ```
 
 将结果与同一 Release 的 `SHA256SUMS.txt` 比对。
@@ -46,7 +47,7 @@ shasum -a 256 MacClean-1.0.0-universal.dmg
 3. 点击「一键清理所选」，核对确认窗口后移到废纸篓。
 4. 如需撤销，在「清理记录」点击恢复，或使用 Finder 废纸篓。
 
-**移到废纸篓不会立即释放磁盘空间。** 确定不再需要后，由你在 Finder 中清空废纸篓；清空后无法通过 MacClean 恢复。
+**移到废纸篓不会立即释放磁盘空间。** 确定不再需要后，由你在 Finder 中清空废纸篓；清空后无法通过 MacClean 恢复。清理后无需重新扫描：已处理项目从列表移除，其他项目及勾选状态保留，恢复后也会更新已有结果。
 
 | 扫描规则 | 条件 | 默认勾选 |
 | --- | --- | --- |
@@ -69,7 +70,7 @@ shasum -a 256 MacClean-1.0.0-universal.dmg
 - 列表占用来自文件系统分配块，硬链接在同一次遍历中计一次；大文件筛选与重复比对使用逻辑大小。APFS 克隆、压缩、快照、云端占位、目录开销和可清除空间会造成与系统存储分类的差异。数值不是承诺可释放空间。
 - 从磁盘根目录扫描时跳过 `/dev`、`/net`、`/Network`、`/Volumes`、`/System/Volumes`，避免设备与重复挂载；可单独选择外置卷扫描。
 - 应用本体扫描 `/Applications`、`~/Applications`、`/System/Applications`。关联数据只按 Bundle ID 精确匹配，不猜测同名目录、不包含共享 Group Container 与应用自行指定的数据目录，因此不能保证完整卸载。系统应用禁止卸载。
-- 重复扫描跳过可识别的 iCloud 未下载文件和 dataless 占位文件，不主动下载云文件；扫描期间变化或不可读取的文件不参与比对。
+- 重复扫描排除废纸篓（`.Trash` / `.Trashes`），并跳过可识别的 iCloud 未下载文件和 dataless 占位文件，不主动下载云文件；扫描期间变化或不可读取的文件不参与比对。
 - 恢复记录只保存在 `~/Library/Application Support/MacClean/history.json`（权限 `0600`），包含本地文件路径。请勿将记录或个人扫描结果提交到公开仓库。
 
 ## 从源码构建
@@ -121,13 +122,21 @@ MC_INTEGRATION_TRASH=1 swift run MacCleanChecks
 
 `MacCleanChecks` 是独立命令行回归程序，不使用 `swift test`。临时夹具在当前目录 `.build/fixtures-*` 中创建，正常退出后删除；真实废纸篓测试会恢复夹具，并验证同名文件不被覆盖。
 
-UI 渲染检查（应用不扫描、不清理，默认仅打开概览）：
+UI 渲染检查（只读取指定范围，不清理）：
 
 ```bash
-dist/MacClean.app/Contents/MacOS/MacClean --capture /absolute/path/overview.png
-hdiutil verify dist/MacClean-1.0.0-universal.dmg
+dist/MacClean.app/Contents/MacOS/MacClean --capture /absolute/path/overview.png --scan-path /path/to/sample --page overview
+hdiutil verify dist/MacClean-1.1.0-universal.dmg
 codesign --verify --deep --strict dist/MacClean.app
 ```
+
+UI 操作回归（只操作 UUID 命名的临时夹具）：
+
+```bash
+dist/MacClean.app/Contents/MacOS/MacClean --ui-check /absolute/path/ui-report.json
+```
+
+检查侧栏每行留白点击、环形图扇区下钻、连续两次清理、剩余勾选、跨页面结果保留和恢复后的局部更新。测试使用独立的临时恢复记录，结束后恢复并移除夹具，不改动日常清理记录。
 
 ## 项目结构
 
@@ -141,7 +150,7 @@ docs/                     截图、安装说明与发行说明
 .github/workflows/        构建检查和标签发行
 ```
 
-扫描与 SHA-256 在后台执行，可取消；界面更新在主线程。大目录结果会占用与文件数量相应的内存，建议从具体目录开始。
+扫描与 SHA-256 在后台执行，可取消；界面更新在主线程。当前启动会话中的扫描结果持续保留，清理与恢复只更新受影响的树枝；重新启动应用会进行首次分析。外部程序引起的变化可通过“刷新分析”重新读取。大目录结果会占用与文件数量相应的内存，建议从具体目录开始。
 
 ## 贡献与许可
 

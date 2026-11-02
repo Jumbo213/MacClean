@@ -19,14 +19,14 @@ struct DuplicatesView: View {
                     LazyVStack(spacing: 15) {
                         ForEach(model.duplicates) { group in
                             VStack(spacing: 0) {
-                                HStack { Text("\(group.files.count) 个相同文件").font(.system(size: 12, weight: .semibold)); Spacer(); Text("多余 \(sizeText(group.reclaimable))").font(.system(size: 11)).foregroundColor(.muted) }.padding(17).background(Color.mint.opacity(0.4))
+                                HStack { Text("\(group.files.count) 个相同文件").font(.system(size: 12, weight: .semibold)); Spacer(); Text("多余 \(sizeText(group.reclaimable))").font(.system(size: 11)).foregroundColor(.muted) }.padding(17).background(Color.tintSurface.opacity(0.4))
                                 ForEach(Array(group.files.enumerated()), id: \.element.id) { index, file in
                                     HStack(spacing: 12) {
                                         CheckBox(checked: model.duplicateSelection.contains(file.id), locked: index == 0) { if !model.duplicateSelection.insert(file.id).inserted { model.duplicateSelection.remove(file.id) } }
                                         IconTile(symbol: "doc", size: 34)
                                         VStack(alignment: .leading, spacing: 4) { Text(file.name).font(.system(size: 12, weight: .medium)); Text(Paths.short(file.url)).font(.system(size: 10)).foregroundColor(.muted).lineLimit(1).truncationMode(.middle) }
                                         Spacer()
-                                        if index == 0 { Text("保留 · 最新副本").font(.system(size: 9, weight: .medium)).foregroundColor(.accent).padding(6).background(Color.mint).clipShape(Capsule()) }
+                                        if index == 0 { Text("保留 · 最新副本").font(.system(size: 9, weight: .medium)).foregroundColor(.accent).padding(6).background(Color.tintSurface).clipShape(Capsule()) }
                                         Text(sizeText(file.logicalBytes)).font(.system(size: 11)).monospacedDigit()
                                         Button { model.reveal(file.url) } label: { Image(systemName: "arrow.up.forward.square").foregroundColor(.muted) }.buttonStyle(.plain)
                                     }.padding(15)

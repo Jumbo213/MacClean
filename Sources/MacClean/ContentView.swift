@@ -8,7 +8,7 @@ struct ContentView: View {
             sidebar.frame(width: 214)
             VStack(spacing: 0) {
                 HStack {
-                    Text("工作空间 / \(model.page.title)").font(.system(size: 11)).foregroundColor(.muted)
+                    Text("MacClean / \(model.page.title)").font(.system(size: 11)).foregroundColor(.muted)
                     Spacer()
                     HStack(spacing: 6) { Circle().fill(Color.accent).frame(width: 5, height: 5); Text("本地处理 · 隐私优先") }
                         .font(.system(size: 10)).foregroundColor(.muted)
@@ -29,6 +29,8 @@ struct ContentView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }.background(Color.canvas)
         }.foregroundColor(.ink).tint(.accent)
+            .coordinateSpace(name: "MacCleanContent")
+            .onPreferenceChange(NavigationFramesKey.self) { model.navigationFrames = $0 }
             .sheet(isPresented: $model.showingReview) { ReviewSheet().environmentObject(model) }
             .sheet(isPresented: $model.showingDetails) { detailsSheet }
     }
@@ -43,16 +45,8 @@ struct ContentView: View {
             }.padding(.top, 52).padding(.bottom, 34).padding(.horizontal, 20)
             Text("我的 MAC").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundColor(.muted).padding(.leading, 28).padding(.bottom, 13)
             ForEach(Array(Page.allCases.dropLast()), id: \.self) { page in
-                Button { model.page = page } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: page.symbol).font(.system(size: 15)).frame(width: 20)
-                        Text(page.title).font(.system(size: 13, weight: model.page == page ? .semibold : .regular))
-                        Spacer()
-                        if model.page == page { Circle().fill(Color.accent).frame(width: 5, height: 5) }
-                    }.foregroundColor(model.page == page ? .accent : .ink.opacity(0.75))
-                        .padding(.horizontal, 14).frame(height: 43)
-                        .background(model.page == page ? Color.mint : Color.clear).clipShape(RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain).padding(.horizontal, 14).padding(.bottom, 5)
+                NavigationRow(page: page, selected: model.page == page) { model.page = page }
+                    .padding(.horizontal, 14).padding(.bottom, 5)
             }
             Spacer()
             VStack(alignment: .leading, spacing: 10) {
@@ -65,9 +59,8 @@ struct ContentView: View {
                 }.frame(height: 4)
                 Text("\(sizeText(model.availableCapacity)) 可用 / \(sizeText(model.totalCapacity))").font(.system(size: 9)).foregroundColor(.muted)
             }.padding(15).background(Color.canvas).clipShape(RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 18).padding(.bottom, 17)
-            Button { model.page = .settings } label: {
-                Label("偏好设置", systemImage: "slider.horizontal.3").font(.system(size: 12)).foregroundColor(.muted)
-            }.buttonStyle(.plain).padding(.horizontal, 28).padding(.bottom, 24)
+            NavigationRow(page: .settings, selected: model.page == .settings) { model.page = .settings }
+                .padding(.horizontal, 14).padding(.bottom, 17)
         }.background(Color.white).overlay(alignment: .trailing) { Color.line.frame(width: 1) }
     }
     private var progressBanner: some View {
@@ -78,7 +71,7 @@ struct ContentView: View {
                 Text(model.progressPath).font(.system(size: 10)).foregroundColor(.muted).lineLimit(1).truncationMode(.middle)
             }
             Spacer(); if model.canCancel { Button("停止") { model.cancel() }.buttonStyle(.bordered).controlSize(.small) }
-        }.padding(14).background(Color.mint)
+        }.padding(14).background(Color.tintSurface)
     }
     private func noticeBanner(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 9) {
@@ -86,7 +79,7 @@ struct ContentView: View {
             Text(text).font(.system(size: 11)).lineSpacing(3).textSelection(.enabled)
             Spacer()
             Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 10)) }.buttonStyle(.plain)
-        }.padding(12).background(Color.mint.opacity(0.65))
+        }.padding(12).background(Color.tintSurface.opacity(0.65))
     }
     private var detailsSheet: some View {
         VStack(alignment: .leading, spacing: 20) {

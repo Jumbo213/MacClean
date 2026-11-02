@@ -26,7 +26,9 @@ struct StorageView: View {
             } else {
                 EmptyPanel(symbol: "internaldrive", title: "从一个文件夹开始", subtitle: "选择用户目录、整个磁盘或任意文件夹。扫描结果包含可读取的文件和隐藏文件；受权限保护的位置会单独提示。", action: { model.scanStorage() }).disabled(model.busy)
             }
-        }.padding(32)
+        }.padding(32).onChange(of: model.storage?.completed) { _ in
+            selected.formIntersection(Set(model.storage?.nodes.keys.map { $0 } ?? []))
+        }
     }
     private func browser(_ scan: StorageScan) -> some View {
         let nodes = currentNodes(scan)
@@ -91,7 +93,7 @@ struct StorageView: View {
     private func proportionalBar(_ scan: StorageScan) -> some View {
         let children = Array(scan.children(of: model.browserPath).prefix(7))
         let total = max(1, scan.nodes[model.browserPath]?.bytes ?? 1)
-        let colors: [Color] = [.accent, Color(red: 0.30, green: 0.64, blue: 0.54), Color(red: 0.54, green: 0.73, blue: 0.62), Color(red: 0.76, green: 0.80, blue: 0.57), Color(red: 0.82, green: 0.68, blue: 0.46), Color(red: 0.65, green: 0.73, blue: 0.77), Color.line]
+        let colors = AppTheme.chart
         return GeometryReader { proxy in
             HStack(spacing: 2) {
                 ForEach(Array(children.enumerated()), id: \.element.id) { index, node in

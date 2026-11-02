@@ -1,11 +1,21 @@
 import SwiftUI
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.appearance = NSAppearance(named: .aqua)
         NSApp.activate(ignoringOtherApps: true)
+        if let index = CommandLine.arguments.firstIndex(of: "--ui-check"), CommandLine.arguments.count > index + 1 {
+            let report = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if let model = AppModel.active, let window = NSApp.windows.first(where: { $0.isVisible }) {
+                    await UIValidation.run(model: model, window: window, report: report)
+                }
+                NSApp.terminate(nil)
+            }
+        }
         // Local render hook for reproducible UI verification. Never changes user files.
         if let index = CommandLine.arguments.firstIndex(of: "--capture"), CommandLine.arguments.count > index + 1 {
             let path = CommandLine.arguments[index + 1]
@@ -23,7 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @main struct MacCleanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var model = AppModel()
+    @StateObject private var model = AppModel.forLaunch()
     var body: some Scene {
         WindowGroup("MacClean") {
             ContentView().environmentObject(model).frame(minWidth: 1080, minHeight: 740)

@@ -1,0 +1,26 @@
+name: 构建检查
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 核心回归检查
+        run: swift run MacCleanChecks
+      - name: Universal 2 打包
+        run: ./scripts/build.sh
+      - name: 检查签名与镜像
+        run: |
+          codesign --verify --deep --strict dist/MacClean.app
+          for dmg in dist/*.dmg; do hdiutil verify "$dmg"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacClean-universal
+          path: |
+            dist/*.dmg
+            dist/SHA256SUMS.txt

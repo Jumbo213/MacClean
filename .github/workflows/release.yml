@@ -1,0 +1,24 @@
+name: 发布 DMG
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查与打包
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          test "$VERSION" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          test -f "docs/RELEASE-$VERSION.md"
+          swift run MacCleanChecks
+          ./scripts/build.sh
+          for dmg in dist/*.dmg; do hdiutil verify "$dmg"; done
+      - name: 发布安装包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/SHA256SUMS.txt --verify-tag --title "MacClean $GITHUB_REF_NAME" --notes-file "docs/RELEASE-${GITHUB_REF_NAME#v}.md"

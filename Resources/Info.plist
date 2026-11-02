@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>MacClean</string>
+<key>CFBundleIdentifier</key><string>io.github.Jumbo213.MacClean</string>
+<key>CFBundleName</key><string>MacClean</string>
+<key>CFBundleDisplayName</key><string>MacClean</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>13.0</string>
+<key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSDesktopFolderUsageDescription</key><string>MacClean 需要读取桌面以统计文件占用，仅在你确认后清理所选文件。</string>
+<key>NSDocumentsFolderUsageDescription</key><string>MacClean 需要读取文稿以统计文件占用，仅在你确认后清理所选文件。</string>
+<key>NSDownloadsFolderUsageDescription</key><string>MacClean 需要读取下载文件夹以统计占用、查找重复文件与旧安装包。</string>
+<key>NSRemovableVolumesUsageDescription</key><string>MacClean 需要读取你选择的外置磁盘以统计文件占用。</string>
+<key>NSNetworkVolumesUsageDescription</key><string>MacClean 需要读取你选择的网络卷以统计文件占用。</string>
+<key>NSHumanReadableCopyright</key><string>Copyright © 2026 Jumbo213. MIT License.</string>
+</dict></plist>

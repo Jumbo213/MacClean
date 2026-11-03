@@ -3,7 +3,7 @@ import Foundation
 public enum AppScanner {
     public static func scan(home: URL = FileManager.default.homeDirectoryForCurrentUser,
                             directories: [URL]? = nil, control: ScanControl = ScanControl(),
-                            progress: @Sendable (ScanProgress) -> Void = { _ in }) throws -> [AppFootprint] {
+                            reuse: ScanReuse = ScanReuse(), progress: @Sendable (ScanProgress) -> Void = { _ in }) throws -> [AppFootprint] {
         let fm = FileManager.default
         let roots = directories ?? [URL(fileURLWithPath: "/Applications"), home.appendingPathComponent("Applications"), URL(fileURLWithPath: "/System/Applications")]
         var urls: [URL] = []
@@ -21,14 +21,14 @@ public enum AppScanner {
             let id = bundle.bundleIdentifier ?? ""
             let validID = !id.isEmpty && !id.contains("/") && id != "." && id != ".."
             let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? url.deletingPathExtension().lastPathComponent
-            let scan = try StorageScanner.scan(root: url, control: control)
+            let scan = try reuse.scan(root: url, control: control)
             let appItem = CleanupItem(url: url, bytes: scan.total, category: "应用本体", reason: "应用程序", recommended: false, stamp: stamp, treeFingerprint: scan.fingerprint())
             let paths = validID ? ["Library/Caches/\(id)", "Library/Application Support/\(id)", "Library/Containers/\(id)", "Library/Preferences/\(id).plist", "Library/Logs/\(id)", "Library/WebKit/\(id)", "Library/Saved Application State/\(id).savedState"] : []
             var related: [CleanupItem] = []; var skipped = scan.skipped.count
             for path in paths {
                 let file = home.appendingPathComponent(path)
                 guard fm.fileExists(atPath: file.path), let relatedStamp = try? FileStamp(url: file), !relatedStamp.isSymlink else { continue }
-                let value = try StorageScanner.scan(root: file, control: control)
+                let value = try reuse.scan(root: file, control: control)
                 skipped += value.skipped.count
                 related.append(CleanupItem(url: file, bytes: value.total, category: "关联数据", reason: "标识符精确匹配 \(id)；可能包含个人数据", recommended: false, stamp: relatedStamp, treeFingerprint: relatedStamp.isDirectory ? value.fingerprint() : nil))
             }

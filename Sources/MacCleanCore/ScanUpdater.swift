@@ -155,9 +155,18 @@ public enum ScanUpdater {
             var files: [FileNode] = []
             for file in group.files {
                 try control.check()
-                guard let stamp = try? FileStamp(url: file.url), stamp == file.stamp else { continue }
-                if intersects(file.url, changes: changes), try DuplicateFinder.sha256(file.url, control: control) != group.digest { continue }
-                files.append(file)
+                guard let stamp = try? FileStamp(url: file.url) else { continue }
+                if intersects(file.url, changes: changes) {
+                    guard stamp.sameIdentity(as: file.stamp), stamp.isRegular else { continue }
+                    do {
+                        guard try DuplicateFinder.sha256(file.url, control: control) == group.digest,
+                              try FileStamp(url: file.url) == stamp else { continue }
+                    } catch MCError.cancelled { throw MCError.cancelled }
+                    catch { continue }
+                    files.append(FileNode(url: file.url, stamp: stamp, bytes: file.bytes, logicalBytes: file.logicalBytes,
+                                          fileCount: 1, children: [], unreadable: false,
+                                          latestModified: Date(timeIntervalSince1970: Double(stamp.modifiedSeconds)), cloudOnly: file.cloudOnly))
+                } else if stamp == file.stamp { files.append(file) }
             }
             if files.count > 1 { result.append(DuplicateGroup(digest: group.digest, files: files)) }
         }

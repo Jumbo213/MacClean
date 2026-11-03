@@ -67,7 +67,10 @@ func XCTAssertThrowsError<T>(_ expression: @autoclosure () throws -> T, _ messag
             ("testIncrementalUpdateDoesNotRescanUnrelatedFiles", suite.testIncrementalUpdateDoesNotRescanUnrelatedFiles),
             ("testDuplicateGroupsRemainAfterPartialCleanup", suite.testDuplicateGroupsRemainAfterPartialCleanup),
             ("testAppAndCleanupRemainUsableAfterRelatedRemoval", suite.testAppAndCleanupRemainUsableAfterRelatedRemoval),
-            ("testDuplicateTrashCopiesAreExcluded", suite.testDuplicateTrashCopiesAreExcluded)
+            ("testDuplicateTrashCopiesAreExcluded", suite.testDuplicateTrashCopiesAreExcluded),
+            ("testSavedStorageIncrementalRefreshMatchesFreshScan", suite.testSavedStorageIncrementalRefreshMatchesFreshScan),
+            ("testDuplicateRefreshReusesHashesAndChecksChangedContent", suite.testDuplicateRefreshReusesHashesAndChecksChangedContent),
+            ("testPreviousScanDoesNotFollowReplacedDirectorySymlink", suite.testPreviousScanDoesNotFollowReplacedDirectorySymlink)
         ]
         var skipped = 0
         for (name, check) in checks {

@@ -288,4 +288,63 @@ final class CoreTests: TestCase {
         XCTAssertTrue(groups.isEmpty)
     }
 
+    func testSavedStorageIncrementalRefreshMatchesFreshScan() throws {
+        let scope = root.appendingPathComponent("scope")
+        let old = try file("scope/sub/removed")
+        let edited = try file("scope/keep/edited")
+        let store = SnapshotStore(directory: root.appendingPathComponent("snapshots"))
+        let original = try StorageScanner.scan(root: scope)
+        try store.write(original, key: "storage")
+        let saved = try XCTUnwrap(store.read(StorageScan.self, key: "storage"))
+        XCTAssertEqual(saved.fingerprint(), original.fingerprint())
+        try fm.removeItem(at: old)
+        let added = try file("scope/sub/added", data: Data(repeating: 8, count: 64_000))
+        try Data(repeating: 9, count: 9000).write(to: edited)
+        let updated = try StorageScanner.scan(root: scope, previous: saved)
+        let fresh = try StorageScanner.scan(root: scope)
+        XCTAssertNil(updated.nodes[old.path])
+        XCTAssertNotNil(updated.nodes[added.path])
+        XCTAssertEqual(updated.nodes[edited.path]?.logicalBytes, 9000)
+        XCTAssertEqual(updated.fingerprint(), fresh.fingerprint())
+        XCTAssertEqual(updated.total, fresh.total)
+    }
+
+    func testDuplicateRefreshReusesHashesAndChecksChangedContent() throws {
+        let scope = root.appendingPathComponent("scope")
+        let content = Data(repeating: 3, count: 1_100_000)
+        let a = try file("scope/a", data: content, age: 2)
+        let b = try file("scope/b", data: content)
+        let initial = try StorageScanner.scan(root: scope)
+        let first = try DuplicateFinder.compare(in: initial)
+        XCTAssertEqual(first.hashedCount, 2)
+        let store = SnapshotStore(directory: root.appendingPathComponent("snapshots"))
+        try store.write(first, key: "duplicates")
+        let saved = try XCTUnwrap(store.read(DuplicateScan.self, key: "duplicates"))
+        let unchanged = try DuplicateFinder.compare(in: initial, previous: saved.digests)
+        XCTAssertEqual(unchanged.hashedCount, 0)
+        XCTAssertEqual(unchanged.groups.count, 1)
+        let originalDate = try XCTUnwrap(fm.attributesOfItem(atPath: b.path)[.modificationDate] as? Date)
+        try Data(repeating: 4, count: content.count).write(to: b)
+        try fm.setAttributes([.modificationDate: originalDate], ofItemAtPath: b.path)
+        let c = try file("scope/c", data: content)
+        let updated = try StorageScanner.scan(root: scope, previous: initial)
+        let changed = try DuplicateFinder.compare(in: updated, previous: saved.digests)
+        XCTAssertEqual(changed.hashedCount, 2)
+        XCTAssertEqual(Set(changed.groups.flatMap(\.files).map(\.id)), Set([a.path, c.path]))
+    }
+
+    func testPreviousScanDoesNotFollowReplacedDirectorySymlink() throws {
+        let old = try file("scope/sub/old")
+        let other = try file("other/private")
+        let scope = root.appendingPathComponent("scope")
+        let sub = old.deletingLastPathComponent()
+        let initial = try StorageScanner.scan(root: scope)
+        try fm.removeItem(at: sub)
+        try fm.createSymbolicLink(at: sub, withDestinationURL: other.deletingLastPathComponent())
+        let result = try StorageScanner.scan(root: scope, previous: initial)
+        XCTAssertTrue(result.nodes[sub.path]?.stamp.isSymlink == true)
+        XCTAssertNil(result.nodes[old.path])
+        XCTAssertNil(result.nodes[sub.appendingPathComponent("private").path])
+    }
+
 }

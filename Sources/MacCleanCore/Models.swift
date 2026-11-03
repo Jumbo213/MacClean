@@ -32,9 +32,16 @@ public struct FileStamp: Codable, Hashable, Sendable {
     public let modifiedNanos: Int64
     public let logicalSize: Int64
     public let mode: UInt16
+    public let changeSeconds: Int64?
+    public let changeNanos: Int64?
     public init(url: URL) throws {
         var info = stat()
         guard url.path.withCString({ lstat($0, &info) }) == 0 else { throw MCError.denied(url.path) }
+        self.init(info: info)
+    }
+    init(info: stat) {
+        changeSeconds = Int64(info.st_ctimespec.tv_sec)
+        changeNanos = Int64(info.st_ctimespec.tv_nsec)
         device = UInt64(UInt32(bitPattern: info.st_dev)); inode = UInt64(info.st_ino)
         modifiedSeconds = Int64(info.st_mtimespec.tv_sec); modifiedNanos = Int64(info.st_mtimespec.tv_nsec)
         logicalSize = info.st_size; mode = info.st_mode
@@ -47,7 +54,7 @@ public struct FileStamp: Codable, Hashable, Sendable {
     }
 }
 
-public struct FileNode: Identifiable, Sendable {
+public struct FileNode: Identifiable, Sendable, Codable {
     public var id: String { url.path }
     public let url: URL
     public let stamp: FileStamp
@@ -58,6 +65,7 @@ public struct FileNode: Identifiable, Sendable {
     public var unreadable: Bool
     public var latestModified: Date
     public let cloudOnly: Bool
+    var directoryReadStamp: FileStamp? = nil
     public var name: String { url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent }
     public var isDirectory: Bool { stamp.isDirectory }
 }
@@ -69,7 +77,7 @@ public struct ScanProgress: Sendable {
     public init(path: String, count: Int, bytes: Int64) { self.path = path; self.count = count; self.bytes = bytes }
 }
 
-public struct StorageScan: Sendable {
+public struct StorageScan: Sendable, Codable {
     public let root: URL
     public let nodes: [String: FileNode]
     public let skipped: [String]
@@ -80,9 +88,15 @@ public struct StorageScan: Sendable {
     public func fingerprint(under rootURL: URL? = nil) -> String {
         let base = rootURL ?? root
         var hash = SHA256()
-        for key in nodes.keys.sorted() where Paths.isInside(URL(fileURLWithPath: key), root: base) {
+        var stack = [base.path]
+        var keys: [String] = []
+        while let path = stack.popLast(), let node = nodes[path] {
+            keys.append(path)
+            stack.append(contentsOf: node.children.filter { nodes[$0] != nil })
+        }
+        for key in keys.sorted() {
             let node = nodes[key]!, stamp = node.stamp
-            let line = "\(key)\u{0}\(stamp.device):\(stamp.inode):\(stamp.mode):\(stamp.logicalSize):\(stamp.modifiedSeconds):\(stamp.modifiedNanos):\(node.unreadable)\n"
+            let line = "\(key)\u{0}\(stamp.device):\(stamp.inode):\(stamp.mode):\(stamp.logicalSize):\(stamp.modifiedSeconds):\(stamp.modifiedNanos):\(stamp.changeSeconds ?? 0):\(stamp.changeNanos ?? 0):\(node.unreadable)\n"
             hash.update(data: Data(line.utf8))
         }
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
@@ -94,7 +108,7 @@ public struct StorageScan: Sendable {
     }
 }
 
-public struct DuplicateProof: Sendable {
+public struct DuplicateProof: Sendable, Codable {
     public let retainedURL: URL
     public let retainedStamp: FileStamp
     public let digest: String
@@ -103,7 +117,7 @@ public struct DuplicateProof: Sendable {
     }
 }
 
-public struct CleanupItem: Identifiable, Sendable {
+public struct CleanupItem: Identifiable, Sendable, Codable {
     public var id: String { url.path }
     public let url: URL
     public let bytes: Int64
@@ -119,12 +133,12 @@ public struct CleanupItem: Identifiable, Sendable {
     }
 }
 
-public struct CleanupScan: Sendable {
+public struct CleanupScan: Sendable, Codable {
     public let items: [CleanupItem]
     public let skipped: [String]
 }
 
-public struct AppFootprint: Identifiable, Sendable {
+public struct AppFootprint: Identifiable, Sendable, Codable {
     public var id: String { url.path }
     public let name: String
     public let url: URL
@@ -140,7 +154,7 @@ public struct AppFootprint: Identifiable, Sendable {
     public var bytes: Int64 { bundle.bytes + related.reduce(0) { $0 + $1.bytes } }
 }
 
-public struct DuplicateGroup: Identifiable, Sendable {
+public struct DuplicateGroup: Identifiable, Sendable, Codable {
     public var id: String { digest }
     public let digest: String
     public let files: [FileNode]

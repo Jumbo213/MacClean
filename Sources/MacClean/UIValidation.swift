@@ -75,6 +75,28 @@ import MacCleanCore
             for record in records { model.restore(record); try await waitUntilIdle(model) }
             check(fm.fileExists(atPath: a.path) && fm.fileExists(atPath: b.path), "Fixture restore succeeds")
             check(model.storage?.nodes[a.path] != nil && model.storage?.nodes[b.path] != nil, "Restored files reappear without rescan")
+            // Exercise the same load and auto-update path as a fresh launch with an isolated cache.
+            let store = SnapshotStore(directory: fixture.appendingPathComponent("SavedScans"))
+            let scope = fixture.appendingPathComponent("Caches")
+            let firstSession = AppModel(service: model.trashService, store: store)
+            firstSession.chosenRoot = scope
+            firstSession.scanStorage()
+            try await waitUntilIdle(firstSession)
+            try fm.removeItem(at: a)
+            try Data(repeating: 1, count: 65536).write(to: b)
+            let added = scope.appendingPathComponent("added.cache")
+            try Data(repeating: 3, count: 8192).write(to: added)
+            let nextSession = AppModel(service: model.trashService, store: store)
+            nextSession.page = .history
+            await nextSession.restoreSavedScans()
+            check(nextSession.storage?.nodes[a.path] != nil && nextSession.chosenRoot.path == scope.path, "New session restores saved storage before scanning")
+            nextSession.page = .storage
+            check(nextSession.showingSavedResult, "Saved results are marked before refresh")
+            nextSession.refreshPageIfNeeded()
+            try await waitUntilIdle(nextSession)
+            check(nextSession.storage?.nodes[a.path] == nil && nextSession.storage?.nodes[added.path] != nil &&
+                  nextSession.storage?.nodes[b.path]?.logicalBytes == 65536 && !nextSession.showingSavedResult,
+                  "New session refresh detects additions, changes and removals")
         } catch { failures.append(error.localizedDescription) }
         // Recover only records belonging to this fixture before removing the scratch folder.
         for record in (try? model.trashService.load()) ?? [] where record.restoredAt == nil {

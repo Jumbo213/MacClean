@@ -89,8 +89,6 @@ struct OverviewView: View {
                     SecondaryButton(title: model.hasCleanupScan ? "查看清理建议" : "扫描垃圾", symbol: "sparkles") { model.page = .cleanup; if !model.hasCleanupScan { model.scanCleanup() } }.disabled(model.busy)
                 }.padding(19).background(Color.tintSurface).clipShape(RoundedRectangle(cornerRadius: 15))
             }.padding(28)
-        }.onAppear {
-            if !model.hasAttemptedStorageScan && !model.busy { model.scanStorage() }
         }.task(id: mapRevision) {
             guard let scan = model.storage else { bigFiles = []; return }
             let root = URL(fileURLWithPath: currentPath)

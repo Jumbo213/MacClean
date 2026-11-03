@@ -3,7 +3,7 @@ import Foundation
 public enum CleanupScanner {
     public static func scan(home: URL = FileManager.default.homeDirectoryForCurrentUser,
                             runningBundleIDs: Set<String> = [], control: ScanControl = ScanControl(),
-                            now: Date = Date(), progress: @Sendable (ScanProgress) -> Void = { _ in }) throws -> CleanupScan {
+                            now: Date = Date(), reuse: ScanReuse = ScanReuse(), progress: @Sendable (ScanProgress) -> Void = { _ in }) throws -> CleanupScan {
         let fm = FileManager.default
         // No cookies, browser sessions, keychains, mail, or app documents are part of these rules.
         let rules: [(String, String, Int, Bool)] = [
@@ -23,7 +23,7 @@ public enum CleanupScanner {
                 try control.check()
                 if runningBundleIDs.contains(where: { url.lastPathComponent == $0 || url.lastPathComponent.hasPrefix($0 + ".") }) { continue }
                 guard let stamp = try? FileStamp(url: url), !stamp.isSymlink else { continue }
-                let result = try StorageScanner.scan(root: url, control: control, progress: progress)
+                let result = try reuse.scan(root: url, control: control, progress: progress)
                 skipped.append(contentsOf: result.skipped)
                 guard let node = result.nodes[url.path], !node.unreadable, node.bytes > 0,
                       node.latestModified < now.addingTimeInterval(-Double(days) * 86400) else { continue }
@@ -40,7 +40,7 @@ public enum CleanupScanner {
                     let age = now.timeIntervalSince1970 - Double(stamp.modifiedSeconds)
                     let installer = ["dmg", "pkg", "iso"].contains(url.pathExtension.lowercased())
                     guard age > Double(installer ? 30 : 90) * 86400 else { continue }
-                    let scan = try StorageScanner.scan(root: url, control: control)
+                    let scan = try reuse.scan(root: url, control: control)
                     items.append(CleanupItem(url: url, bytes: scan.total, category: installer ? "旧安装包" : "旧下载",
                                              reason: installer ? "超过 30 天的安装包，请确认已不需要" : "超过 90 天未修改，请确认已不需要",
                                              recommended: false, stamp: stamp))

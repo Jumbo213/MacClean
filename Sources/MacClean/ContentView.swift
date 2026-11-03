@@ -15,6 +15,11 @@ struct ContentView: View {
                 }.padding(.horizontal, 32).frame(height: 57)
                 Divider().overlay(Color.line)
                 if model.busy { progressBanner }
+                if model.showingSavedResult {
+                    Label("当前显示上次保存的结果，更新后即可清理。", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 11)).foregroundColor(.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 32).padding(.vertical, 9)
+                }
                 if let notice = model.notice { noticeBanner(notice) }
                 Group {
                     switch model.page {
@@ -29,6 +34,9 @@ struct ContentView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }.background(Color.canvas)
         }.foregroundColor(.ink).tint(.accent)
+            .task { await model.restoreSavedScans() }
+            .onChange(of: model.page) { _ in model.refreshPageIfNeeded() }
+            .onChange(of: model.busy) { busy in if !busy { model.refreshPageIfNeeded() } }
             .coordinateSpace(name: "MacCleanContent")
             .onPreferenceChange(NavigationFramesKey.self) { model.navigationFrames = $0 }
             .sheet(isPresented: $model.showingReview) { ReviewSheet().environmentObject(model) }

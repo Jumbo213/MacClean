@@ -48,7 +48,13 @@ func sizeText(_ bytes: Int64) -> String {
     @Published var progressPath = ""
     @Published var scannedCount = 0
     @Published var storage: StorageScan?
-    @Published var browserPath = ""
+    @Published var browserPath = "" {
+        didSet {
+            if remembersBrowserPath, !browserPath.isEmpty {
+                UserDefaults.standard.set(browserPath, forKey: "lastStorageBrowserPath")
+            }
+        }
+    }
     @Published var chosenRoot = FileManager.default.homeDirectoryForCurrentUser
     @Published var apps: [AppFootprint] = []
     @Published var hasAppScan = false
@@ -77,12 +83,25 @@ func sizeText(_ bytes: Int64) -> String {
     private var cleanupCatalog: [CleanupItem] = []
     private var appCatalog: [AppFootprint] = []
     private var duplicateCatalog: [DuplicateGroup] = []
+    @Published private(set) var waitingForRefresh: Set<Page> = []
+    private var pendingAutoRefresh: Set<Page> = []
+    private let snapshotStore: SnapshotStore?
+    private let remembersBrowserPath: Bool
+    private var cleanupIndex: [String: StorageScan] = [:]
+    private var appIndex: [String: StorageScan] = [:]
+    private var duplicateScan: StorageScan?
+    private var duplicateDigests: [String: FileDigest] = [:]
+    private var loadedSnapshots = false
     let trashService: TrashService
     static weak var active: AppModel?
     private var control: ScanControl?
 
-    init(service: TrashService? = nil) {
+    init(service: TrashService? = nil, store: SnapshotStore? = nil) {
         trashService = service ?? TrashService()
+        remembersBrowserPath = service == nil && store == nil && !CommandLine.arguments.contains("--capture")
+        snapshotStore = store ?? (service == nil && !CommandLine.arguments.contains("--capture")
+            ? SnapshotStore(directory: trashService.historyURL.deletingLastPathComponent().appendingPathComponent("ScanSnapshots"))
+            : nil)
         ignoredPaths = Set(UserDefaults.standard.stringArray(forKey: "ignoredPaths") ?? [])
         Self.active = self
         refreshDisk(); loadHistory()
@@ -149,62 +168,189 @@ func sizeText(_ bytes: Int64) -> String {
             self?.progressPath = value.path; self?.scannedCount = value.count
         }
     }
+    func restoreSavedScans() async {
+        guard !loadedSnapshots else { return }
+        loadedSnapshots = true
+        if let snapshotStore {
+            guard let _ = begin("正在读取上次扫描结果", cancellable: false) else { return }
+            let saved = await Task.detached(priority: .userInitiated) { SavedScans(store: snapshotStore) }.value
+            if let scan = saved.storage, scan.nodes[scan.root.path] != nil {
+                storage = scan
+                chosenRoot = scan.root
+                let savedPath = remembersBrowserPath ? UserDefaults.standard.string(forKey: "lastStorageBrowserPath") : nil
+                browserPath = savedPath ?? scan.root.path
+                repairBrowserPath()
+                waitingForRefresh.insert(.storage)
+            }
+            if let saved = saved.cleanup {
+                cleanup = saved.items
+                cleanupCatalog = saved.items
+                cleanupIndex = saved.index
+                cleanupSkipped = saved.skipped
+                hasCleanupScan = true
+                waitingForRefresh.insert(.cleanup)
+            }
+            if let saved = saved.apps {
+                apps = saved.items
+                appCatalog = saved.items
+                appIndex = saved.index
+                hasAppScan = true
+                waitingForRefresh.insert(.apps)
+            }
+            if let saved = saved.duplicates {
+                duplicateRoot = saved.scan.root
+                duplicateScan = saved.scan
+                duplicates = saved.groups
+                duplicateCatalog = saved.groups
+                duplicateDigests = saved.digests
+                hasDuplicateScan = true
+                waitingForRefresh.insert(.duplicates)
+            }
+            pendingAutoRefresh = waitingForRefresh
+            finish()
+        }
+        refreshPageIfNeeded()
+    }
+
+    var showingSavedResult: Bool {
+        waitingForRefresh.contains(page == .overview ? .storage : page)
+    }
+
+    func refreshPageIfNeeded() {
+        guard loadedSnapshots, !busy, !showingReview, !showingDetails else { return }
+        let target = page == .overview ? Page.storage : page
+        if target == .storage, !hasAttemptedStorageScan {
+            scanStorage()
+            return
+        }
+        guard pendingAutoRefresh.contains(target) else { return }
+        switch target {
+        case .storage: scanStorage()
+        case .cleanup: scanCleanup()
+        case .apps: scanApps()
+        case .duplicates: scanDuplicates()
+        default: break
+        }
+    }
+
+    private func saveSnapshot<Value: Encodable & Sendable>(_ value: Value, key: String) async -> String? {
+        guard let snapshotStore else { return nil }
+        do {
+            try await Task.detached(priority: .utility) { try snapshotStore.write(value, key: key) }.value
+            return nil
+        } catch {
+            return "结果已更新，但无法保存供下次启动使用。"
+        }
+    }
+
     func scanStorage() {
-        guard let control = begin("正在分析存储空间") else { return }
-        hasAttemptedStorageScan = true
         let root = chosenRoot
+        let previous = storage?.root.path == root.path ? storage : nil
+        guard let control = begin(previous == nil ? "正在分析存储空间" : "正在增量检查存储变化") else { return }
+        pendingAutoRefresh.remove(.storage)
+        hasAttemptedStorageScan = true
         Task {
             do {
                 let result = try await Task.detached(priority: .userInitiated) { [self] in
-                    try StorageScanner.scan(root: root, control: control) { self.progress($0) }
+                    try StorageScanner.scan(root: root, previous: previous, control: control) { self.progress($0) }
                 }.value
-                storage = result; browserPath = root.path; finish()
-                if !result.skipped.isEmpty { notice = "有 \(result.skipped.count) 个位置未读取。结果仅包含可访问内容。" }
-            } catch { finish(error) }
+                operation = "正在保存扫描结果"
+                canCancel = false
+                let warning = await saveSnapshot(result, key: SavedScans.storageKey)
+                storage = result
+                if previous == nil { browserPath = result.root.path }
+                repairBrowserPath()
+                waitingForRefresh.remove(.storage)
+                finish()
+                notice = warning ?? (result.skipped.isEmpty ? nil : "有 \(result.skipped.count) 个位置未读取。结果仅包含可访问内容。")
+            } catch {
+                if let storage { chosenRoot = storage.root }
+                finish(error)
+            }
         }
     }
+
     func scanCleanup() {
-        guard let control = begin("正在查找可清理项目") else { return }
-        let ids = runningIDs
+        guard let control = begin(hasCleanupScan ? "正在更新可清理项目" : "正在查找可清理项目") else { return }
+        pendingAutoRefresh.remove(.cleanup)
+        let ids = runningIDs, index = cleanupIndex
+        let oldItems = Set(cleanup.map(\.id)), oldSelection = cleanupSelection
+        let restoredSnapshot = waitingForRefresh.contains(.cleanup)
         Task {
             do {
                 let result = try await Task.detached(priority: .userInitiated) { [self] in
-                    try CleanupScanner.scan(runningBundleIDs: ids, control: control) { self.progress($0) }
+                    let reuse = ScanReuse(previous: index)
+                    let scan = try CleanupScanner.scan(runningBundleIDs: ids, control: control, reuse: reuse) { self.progress($0) }
+                    return SavedCleanup(items: scan.items, skipped: scan.skipped, index: reuse.results)
                 }.value
-                cleanup = result.items; cleanupCatalog = result.items; cleanupSkipped = result.skipped; hasCleanupScan = true
-                cleanupSelection = Set(visibleCleanup.filter(\.recommended).map(\.id)); finish()
-                if !result.skipped.isEmpty { notice = "有 \(result.skipped.count) 个位置未读取，可查看扫描详情。" }
+                canCancel = false
+                let warning = await saveSnapshot(result, key: SavedScans.cleanupKey)
+                cleanup = result.items; cleanupCatalog = result.items; cleanupIndex = result.index
+                cleanupSkipped = result.skipped; hasCleanupScan = true
+                cleanupSelection = Set(visibleCleanup.filter { item in
+                    restoredSnapshot ? item.recommended : (oldItems.contains(item.id) ? oldSelection.contains(item.id) : item.recommended)
+                }.map(\.id))
+                waitingForRefresh.remove(.cleanup)
+                finish()
+                notice = warning ?? (result.skipped.isEmpty ? nil : "有 \(result.skipped.count) 个位置未读取，可查看扫描详情。")
             } catch { finish(error) }
         }
     }
+
     func scanApps() {
-        guard let control = begin("正在统计应用占用") else { return }
+        guard let control = begin(hasAppScan ? "正在更新应用占用" : "正在统计应用占用") else { return }
+        pendingAutoRefresh.remove(.apps)
+        let index = appIndex
         Task {
             do {
                 let result = try await Task.detached(priority: .userInitiated) { [self] in
-                    try AppScanner.scan(control: control) { self.progress($0) }
+                    let reuse = ScanReuse(previous: index)
+                    let items = try AppScanner.scan(control: control, reuse: reuse) { self.progress($0) }
+                    return SavedApps(items: items, index: reuse.results)
                 }.value
-                apps = result; appCatalog = result; hasAppScan = true; finish()
+                canCancel = false
+                let warning = await saveSnapshot(result, key: SavedScans.appsKey)
+                apps = result.items; appCatalog = result.items; appIndex = result.index; hasAppScan = true
+                waitingForRefresh.remove(.apps)
+                finish()
+                notice = warning
             } catch { finish(error) }
         }
     }
+
     func scanDuplicates() {
-        guard let control = begin("正在比对重复文件") else { return }
         let root = duplicateRoot
+        let previous = duplicateScan?.root.path == root.path ? duplicateScan : nil
+        let digests = previous == nil ? [:] : duplicateDigests
+        guard let control = begin(previous == nil ? "正在比对重复文件" : "正在检查变化的重复文件") else { return }
+        pendingAutoRefresh.remove(.duplicates)
         Task {
             do {
                 let result = try await Task.detached(priority: .userInitiated) { [self] in
-                    let scan = try StorageScanner.scan(root: root, control: control) { self.progress($0) }
-                    let groups = try DuplicateFinder.find(in: scan, control: control) { self.progress($0) }
-                    return (groups, scan.skipped)
+                    let scan = try StorageScanner.scan(root: root, previous: previous, control: control) { self.progress($0) }
+                    let compared = try DuplicateFinder.compare(in: scan, previous: digests, control: control) { self.progress($0) }
+                    return SavedDuplicates(scan: scan, groups: compared.groups, digests: compared.digests)
                 }.value
-                duplicates = result.0; duplicateCatalog = result.0; hasDuplicateScan = true; duplicateSelection = []; finish()
-                if !result.1.isEmpty { notice = "有 \(result.1.count) 个位置未读取，未参与重复比对。" }
-            } catch { finish(error) }
+                canCancel = false
+                let warning = await saveSnapshot(result, key: SavedScans.duplicatesKey)
+                duplicateScan = result.scan; duplicateDigests = result.digests
+                duplicates = result.groups; duplicateCatalog = result.groups; hasDuplicateScan = true
+                duplicateSelection.formIntersection(Set(duplicates.flatMap { $0.files.dropFirst().map(\.id) }))
+                waitingForRefresh.remove(.duplicates)
+                finish()
+                notice = warning ?? (result.scan.skipped.isEmpty ? nil : "有 \(result.scan.skipped.count) 个位置未读取，未参与重复比对。")
+            } catch {
+                if let duplicateScan { duplicateRoot = duplicateScan.root }
+                finish(error)
+            }
         }
     }
     func requestTrash(_ items: [CleanupItem]) {
         guard !busy, !items.isEmpty else { return }
+        guard !showingSavedResult else {
+            notice = "这是上次保存的结果，请先更新本页再清理。"
+            return
+        }
         pending = SafetyPolicy.removingOverlaps(items); showingReview = true
     }
     func item(for node: FileNode) -> CleanupItem {
@@ -279,7 +425,10 @@ func sizeText(_ bytes: Int64) -> String {
         let cleanupSnapshot = cleanupInput, appSnapshot = appInput, groups = duplicateCatalog
         do {
             let result = try await Task.detached(priority: .userInitiated) {
-                let scan = try previousScan.map { try ScanUpdater.applying(moves, to: $0) }
+                let scan = try previousScan.map { scan in
+                    guard ScanUpdater.intersects(scan.root, changes: changes) else { return scan }
+                    return try ScanUpdater.applying(moves, to: scan)
+                }
                 var cleaned: [CleanupItem] = []
                 for item in cleanupSnapshot { if let value = try ScanUpdater.refresh(item, changes: changes) { cleaned.append(value) } }
                 return (scan, cleaned, try ScanUpdater.refreshApps(appSnapshot, changes: changes),
@@ -288,18 +437,34 @@ func sizeText(_ bytes: Int64) -> String {
             storage = result.0; cleanup = result.1; apps = result.2; duplicates = result.3
             cleanupSelection.formIntersection(Set(cleanup.map(\.id)))
             duplicateSelection.formIntersection(Set(duplicates.flatMap { $0.files.dropFirst().map(\.id) }))
-            if let scan = storage {
-                while scan.nodes[browserPath] == nil && browserPath != scan.root.path {
-                    browserPath = URL(fileURLWithPath: browserPath).deletingLastPathComponent().path
-                    if !Paths.isInside(URL(fileURLWithPath: browserPath), root: scan.root) { browserPath = scan.root.path; break }
-                }
-                if let selected = mapSelectedPath, scan.nodes[selected] == nil { mapSelectedPath = nil }
-            }
+            repairBrowserPath()
+            var warnings: [String] = []
+            if let scan = storage, ScanUpdater.intersects(scan.root, changes: changes),
+               let warning = await saveSnapshot(scan, key: SavedScans.storageKey) { warnings.append(warning) }
+            if hasCleanupScan, cleanupSnapshot.contains(where: { ScanUpdater.intersects($0.url, changes: changes) }),
+               let warning = await saveSnapshot(SavedCleanup(items: cleanup, skipped: cleanupSkipped, index: cleanupIndex), key: SavedScans.cleanupKey) { warnings.append(warning) }
+            if hasAppScan, appSnapshot.contains(where: { app in
+                ScanUpdater.intersects(app.url, changes: changes) || app.related.contains { ScanUpdater.intersects($0.url, changes: changes) }
+            }), let warning = await saveSnapshot(SavedApps(items: apps, index: appIndex), key: SavedScans.appsKey) { warnings.append(warning) }
+            if let scan = duplicateScan, ScanUpdater.intersects(scan.root, changes: changes),
+               let warning = await saveSnapshot(SavedDuplicates(scan: scan, groups: duplicates, digests: duplicateDigests), key: SavedScans.duplicatesKey) { warnings.append(warning) }
+            if let warning = warnings.first { details = [warning]; showingDetails = true }
         } catch {
             // Keep the last snapshot on a partial refresh error rather than discarding every page.
             details = ["局部更新未完成，已有结果仍保留：\(error.localizedDescription)"]
             showingDetails = true
         }
+    }
+
+    private func repairBrowserPath() {
+        guard let scan = storage else { return }
+        var path = browserPath
+        if path.isEmpty || !Paths.isInside(URL(fileURLWithPath: path), root: scan.root) { path = scan.root.path }
+        while scan.nodes[path]?.isDirectory != true && path != scan.root.path {
+            path = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        }
+        if browserPath != path { browserPath = path }
+        if let selected = mapSelectedPath, scan.nodes[selected] == nil { mapSelectedPath = nil }
     }
 
     func openMapNode(_ node: FileNode) {

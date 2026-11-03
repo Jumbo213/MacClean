@@ -23,19 +23,31 @@ public struct SnapshotStore: Sendable {
     public init(directory: URL) { self.directory = directory }
 
     public func read<Value: Decodable>(_ type: Value.Type, key: String) throws -> Value? {
-        let url = directory.appendingPathComponent(key + ".json")
+        let legacy = directory.appendingPathComponent(key + ".json")
+        let compressed = legacy.appendingPathExtension("lz4")
+        let data: Data
         do {
-            return try JSONDecoder().decode(type, from: Data(contentsOf: url, options: .mappedIfSafe))
+            let bytes = try NSData(contentsOf: compressed, options: .mappedIfSafe)
+            data = try bytes.decompressed(using: .lz4) as Data
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            return nil
+            do {
+                data = try Data(contentsOf: legacy, options: .mappedIfSafe)
+            } catch let missing as CocoaError where missing.code == .fileReadNoSuchFile {
+                return nil
+            }
         }
+        return try JSONDecoder().decode(type, from: data)
     }
 
     public func write<Value: Encodable>(_ value: Value, key: String) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let url = directory.appendingPathComponent(key + ".json")
-        try JSONEncoder().encode(value).write(to: url, options: .atomic)
+        let legacy = directory.appendingPathComponent(key + ".json")
+        let url = legacy.appendingPathExtension("lz4")
+        let encoded = try JSONEncoder().encode(value) as NSData
+        let compressed = try encoded.compressed(using: .lz4)
+        try compressed.write(to: url, options: .atomic)
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        if fm.fileExists(atPath: legacy.path) { try fm.removeItem(at: legacy) }
     }
 }

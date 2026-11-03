@@ -25,7 +25,7 @@
 
 ## 安装
 
-1. 在 [Releases](https://github.com/Jumbo213/MacClean/releases) 下载 `MacClean-1.2.0-universal.dmg`。
+1. 在 [Releases](https://github.com/Jumbo213/MacClean/releases) 下载 `MacClean-1.2.1-universal.dmg`。
 2. 打开 DMG，把 **MacClean.app** 拖入 **Applications**。
 3. 打开应用，首次自动分析用户目录；可在概览选择其他目录或整盘分析。需要更多覆盖时，在「系统设置 → 隐私与安全性 → 完整磁盘访问权限」添加 MacClean，退出后重新打开。
 
@@ -36,7 +36,7 @@
 当前 Release 使用 **ad-hoc 临时签名，未经 Apple Developer ID 签名与公证**，下载后 macOS 可能拦截。确认文件来自本仓库且校验一致后，在「系统设置 → 隐私与安全性」选择允许打开。不要全局关闭 Gatekeeper。也可以自行从源码构建。具体步骤参见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
 
 ```bash
-shasum -a 256 MacClean-1.2.0-universal.dmg
+shasum -a 256 MacClean-1.2.1-universal.dmg
 ```
 
 将结果与同一 Release 的 `SHA256SUMS.txt` 比对。
@@ -127,7 +127,7 @@ UI 渲染检查（只读取指定范围，不清理）：
 
 ```bash
 dist/MacClean.app/Contents/MacOS/MacClean --capture /absolute/path/overview.png --scan-path /path/to/sample --page overview
-hdiutil verify dist/MacClean-1.2.0-universal.dmg
+hdiutil verify dist/MacClean-1.2.1-universal.dmg
 codesign --verify --deep --strict dist/MacClean.app
 ```
 
@@ -153,7 +153,7 @@ docs/                     截图、安装说明与发行说明
 
 扫描与 SHA-256 在后台执行，可取消；界面更新在主线程。
 
-扫描快照保存在 `~/Library/Application Support/MacClean/ScanSnapshots`，包括文件路径、大小、修改状态与重复文件摘要。再次打开时，存储概览会显示上次结果并在后台刷新，其他已扫描页面在打开时刷新。增量检查会核对已有文件的元数据，复用未变目录的清单和未变文件的摘要。新增、改动、删除或移走的项目会反映在更新后的结果中。更换扫描范围时会建立该范围的新快照。应用刚升级时需要完成一次扫描才能建立快照。
+扫描快照以压缩格式保存在 `~/Library/Application Support/MacClean/ScanSnapshots`，包括文件路径、大小、修改状态与重复文件摘要。再次打开时，存储概览会显示上次结果并在后台刷新，其他已扫描页面在打开时刷新。增量检查会核对已有文件的元数据，复用未变目录的清单和未变文件的摘要。新增、改动、删除或移走的项目会反映在更新后的结果中。更换扫描范围时会建立该范围的新快照。应用刚升级时需要完成一次扫描才能建立快照。
 
 ## 贡献与许可
 
